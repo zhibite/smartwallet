@@ -1,0 +1,23 @@
+# Caddy 自动 HTTPS 配置
+# 安装: cp Caddyfile /etc/caddy/Caddyfile && systemctl reload caddy
+
+smartwallet.tokensee.com {
+    reverse_proxy localhost:3001 {
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    # 启用 gzip
+    encode gzip
+
+    # 日志
+    log {
+        output file /var/log/caddy/smartwallet.log
+    }
+}
+
+# 健康检查端点（可选）
+health.smartwallet.tokensee.com {
+    respond "ok" 200
+}
