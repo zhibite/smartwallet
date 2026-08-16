@@ -1,20 +1,18 @@
 # Caddy 自动 HTTPS 配置
 # 安装: cp Caddyfile /etc/caddy/Caddyfile && systemctl reload caddy
+#
+# 前置: mkdir -p /var/log/caddy && chown caddy:caddy /var/log/caddy
+#
+# 如果日志写不进 /var/log/caddy/smartwallet.log，把下面 output file
+# 改成 "output stdout"，Caddy 就会把访问日志发到 systemd journal
+# (journalctl -u caddy -f 查看)。
 
 smartwallet.tokensee.com {
-    reverse_proxy localhost:3001 {
-        header_up X-Real-IP {remote_host}
-        header_up X-Forwarded-For {remote_host}
-        header_up X-Forwarded-Proto {scheme}
-    }
-
-    # 启用 gzip
-    encode gzip
-
-    # 日志
-    log {
-        output file /var/log/caddy/smartwallet.log
-    }
+	encode gzip
+	reverse_proxy localhost:3001
+	log {
+		output file /var/log/caddy/smartwallet.log
+	}
 }
 
 # 健康检查端点（可选）—— 默认注释掉，因为要求 health 子域解析。
@@ -22,5 +20,5 @@ smartwallet.tokensee.com {
 # 在 DNS 加一条 A 记录指向 VPS，然后取消下面注释并 reload caddy。
 #
 # health.smartwallet.tokensee.com {
-#     respond "ok" 200
+# 	respond "ok" 200
 # }
