@@ -17,12 +17,8 @@ async function main() {
   `);
 
   console.log("[hypertable] creating AuditLog hypertable (partition by \"createdAt\")...");
-  // AuditLog 的主键是 id（自增），但 TimescaleDB 要求分区列 createdAt
-  // 必须在某条唯一索引里，所以先建一个 (createdAt, id) 的唯一索引。
-  await prisma.$executeRawUnsafe(`
-    CREATE UNIQUE INDEX IF NOT EXISTS "AuditLog_createdAt_id_key"
-      ON "AuditLog" ("createdAt", "id");
-  `);
+  // AuditLog 的 PK 本身是 (id, createdAt) 复合键，已经包含了 TimescaleDB 要求的
+  // partitioning column（createdAt），可以直接 create_hypertable。
   await prisma.$executeRawUnsafe(`
     SELECT create_hypertable(
       '"AuditLog"',

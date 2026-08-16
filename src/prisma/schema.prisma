@@ -338,21 +338,22 @@ model SyncStatus {
 }
 
 model AuditLog {
-  id         BigInt   @id @default(autoincrement())
-  userId     String?
-  action     String
-  target     String?
-  payload    Json?
-  ip         String?
-  userAgent  String?
-  createdAt  DateTime @default(now())
+  id        BigInt   @default(autoincrement())
+  userId    String?
+  action    String
+  target    String?
+  payload   Json?
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
 
-  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
-  // 注：createdAt 不进主键（AuditLog 的 PK 仍是 id），所以TimescaleDB 会报错
-  // "cannot create a unique index without the column createdAt"。解决办法见
-  // scripts/enable-timescale.ts：在 create_hypertable 之前先
-  // CREATE UNIQUE INDEX ON "AuditLog" ("createdAt", "id")。
+  // PK 设为 (id, createdAt)：TimescaleDB 要求 hypertable 的 partitioning column
+  // 必须出现在 PK 中。id 仍为 BIGSERIAL-like 自增。
+  // 业务上 auditLog 只用 create，没有基于 id 的 findUnique/update/delete，
+  // 故复合 PK 不影响调用方。
+  @@id([id, createdAt])
   @@index([userId, createdAt(sort: Desc)])
   @@index([action, createdAt(sort: Desc)])
 }
