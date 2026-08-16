@@ -1,17 +1,27 @@
 # Caddy 自动 HTTPS 配置
 # 安装: cp Caddyfile /etc/caddy/Caddyfile && systemctl reload caddy
 #
-# 前置: mkdir -p /var/log/caddy && chown caddy:caddy /var/log/caddy
+# 日志走 stdout -> systemd journal，避免 /var/log/caddy/smartwallet.log
+# 的权限问题。查看:  journalctl -u caddy -f
 #
-# 如果日志写不进 /var/log/caddy/smartwallet.log，把下面 output file
-# 改成 "output stdout"，Caddy 就会把访问日志发到 systemd journal
-# (journalctl -u caddy -f 查看)。
+# 想用文件日志？换成:
+#     log {
+#         output file /var/log/caddy/smartwallet.log {
+#             roll_size 100MiB
+#             roll_keep 5
+#         }
+#     }
+# 然后:  sudo mkdir -p /var/log/caddy
+#        sudo chown -R caddy:caddy /var/log/caddy
+#        sudo touch /var/log/caddy/smartwallet.log
+#        sudo chown caddy:caddy /var/log/caddy/smartwallet.log
+#        sudo systemctl reload caddy
 
 smartwallet.tokensee.com {
 	encode gzip
 	reverse_proxy localhost:3001
 	log {
-		output file /var/log/caddy/smartwallet.log
+		output stdout
 	}
 }
 
