@@ -7,12 +7,15 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "isolatedModules": true,
-    "noEmit": true,
+    "isolatedModules": false,
+    "noEmit": false,
+    "outDir": "./dist",
     "baseUrl": ".",
+    "rootDir": "src",
     "paths": {
       "@/*": ["../../src/*"]
     }
   },
-  "include": ["src/**/*.ts", "../../src/lib/**/*.ts", "../../src/prisma/**/*.ts"]
+  "include": ["src/**/*.ts", "../../src/lib/**/*.ts", "../../src/prisma/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
 }

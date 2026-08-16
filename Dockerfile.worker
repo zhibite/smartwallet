@@ -1,11 +1,17 @@
-FROM node:20-alpine
+FROM node:20-alpine AS deps
 WORKDIR /app
-ENV NODE_ENV=production
 COPY package.json package-lock.json* ./
 COPY src/prisma ./src/prisma
-RUN npm ci && npx prisma generate --schema=src/prisma/schema.prisma
-COPY . .
+RUN npm ci
+
+FROM node:20-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
 RUN addgroup -g 1001 -S nodejs && adduser -S worker -u 1001
+COPY --from=deps /app/node_modules ./node_modules
+COPY package.json ./
+COPY src ./src
+COPY apps ./apps
 USER worker
 EXPOSE 3002
-CMD ["sh", "-c", "node node_modules/.bin/tsx apps/worker/src/index.ts"]
+CMD ["node", "node_modules/.bin/tsx", "apps/worker/src/index.ts"]

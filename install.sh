@@ -80,13 +80,9 @@ docker compose up -d --build
 echo "等待 postgres 健康..."
 sleep 15
 
-# 初始化数据库
+# 初始化数据库（一次性 init 容器，profile=init 不参与常规 up）
 echo "初始化数据库..."
-docker exec -it smartwallet-web sh -c "
-  npx prisma db push --schema=src/prisma/schema.prisma --skip-generate && \
-  npx tsx scripts/enable-timescale.ts && \
-  npx tsx src/prisma/seed.ts
-" 2>&1 | grep -v "^$" || true
+docker compose --profile init run --rm init
 
 # 设置 update.sh 权限
 chmod +x /opt/smartwallet/update.sh

@@ -29,6 +29,25 @@ services:
       timeout: 3s
       retries: 5
 
+  init:
+    build:
+      context: .
+      dockerfile: Dockerfile.init
+    container_name: smartwallet-init
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-smart}:${POSTGRES_PASSWORD:-smart}@postgres:5432/${POSTGRES_DB:-smartwallet}
+      DIRECT_URL: postgresql://${POSTGRES_USER:-smart}:${POSTGRES_PASSWORD:-smart}@postgres:5432/${POSTGRES_DB:-smartwallet}
+    profiles: ["init"]
+    command: >
+      sh -c "
+        npx prisma db push --schema=src/prisma/schema.prisma --skip-generate &&
+        npx tsx scripts/enable-timescale.ts &&
+        npx tsx src/prisma/seed.ts
+      "
+
   web:
     build:
       context: .

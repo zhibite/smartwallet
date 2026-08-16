@@ -1,0 +1,8 @@
+FROM node:20-alpine
+WORKDIR /app
+COPY package.json package-lock.json* ./
+COPY src/prisma ./src/prisma
+RUN npm ci
+COPY . .
+RUN npx prisma generate --schema=src/prisma/schema.prisma
+CMD ["echo", "smartwallet-init ready. Run with: docker compose --profile init run --rm init"]
