@@ -16,17 +16,17 @@ async function main() {
     );
   `);
 
-  console.log("[hypertable] creating AuditLog hypertable (partition by created_at)...");
-  // AuditLog 的主键是 id（自增），但 TimescaleDB 要求分区列 created_at
-  // 必须在某条唯一索引里，所以先建一个 (created_at, id) 的唯一索引。
+  console.log("[hypertable] creating AuditLog hypertable (partition by \"createdAt\")...");
+  // AuditLog 的主键是 id（自增），但 TimescaleDB 要求分区列 createdAt
+  // 必须在某条唯一索引里，所以先建一个 (createdAt, id) 的唯一索引。
   await prisma.$executeRawUnsafe(`
-    CREATE UNIQUE INDEX IF NOT EXISTS "AuditLog_created_at_id_key"
-      ON "AuditLog" ("created_at", "id");
+    CREATE UNIQUE INDEX IF NOT EXISTS "AuditLog_createdAt_id_key"
+      ON "AuditLog" ("createdAt", "id");
   `);
   await prisma.$executeRawUnsafe(`
     SELECT create_hypertable(
       '"AuditLog"',
-      'created_at',
+      'createdAt',
       if_not_exists => TRUE,
       chunk_time_interval => INTERVAL '7 days'
     );
@@ -36,7 +36,7 @@ async function main() {
   await prisma.$executeRawUnsafe(`
     ALTER TABLE "PricePoint" SET (
       timescaledb.compress,
-      timescaledb.compress_segmentby = 'token_mint'
+      timescaledb.compress_segmentby = '"tokenMint"'
     );
   `);
   await prisma.$executeRawUnsafe(`
