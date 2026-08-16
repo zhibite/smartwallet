@@ -304,7 +304,7 @@ Job 间依赖通过 `txSyncQueue.on('completed', () => txParseQueue.add(...))` �
 
 | 服务 | 镜像/构建 | 端口 | 说明 |
 |---|---|---|---|
-| `web` | `Dockerfile` (next build) | 3000 | Next.js standalone |
+| `web` | `Dockerfile` (next build) | 3001 | Next.js standalone |
 | `worker` | 同 `Dockerfile`, `cmd: node apps/worker` | - | 后台进程 |
 | `postgres` | `timescale/timescaledb:latest-pg16` | 5432 | 时序扩展 |
 | `redis` | `redis:7-alpine` | 6379 | 队列 |

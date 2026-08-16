@@ -34,10 +34,10 @@ npm run worker:dev
 
 ---
 
-## 2. 生产部署（Coolify 推荐）
+## 2. 生产部署（Coolify 自托管）
 
-> 自托管自的 50 个聪明钱监控场景，**单台 2C4G 服务器 + Coolify** 是最稳路径。
-> 全栈都用 compose 编排，PG/Redis 数据完全本地化，TimescaleDB 也能装。
+> 跟 1.bquant 多项目共存，单端口 mapping + Traefik 反代。
+> 这个 compose 文件 4 个服务都在同一个 project 里，**不需要 Coolify 单独管它们**。
 
 ### 2.1 服务器最低配置
 
@@ -48,94 +48,87 @@ npm run worker:dev
 | 磁盘 | 40 GB SSD | 80 GB SSD |
 | OS | Ubuntu 22.04 / Debian 12 | 同左 |
 
-### 2.2 在 Coolify 里拉这个仓库
+### 2.2 部署步骤
 
-1. **Coolify 控制台** → **+ New** → **Application** → **Private Repository**（或者 GitHub App）
-2. Build Pack 选 **Docker Compose**
-3. Base Directory 留空（仓库根目录有 `docker-compose.yml`）
-4. Branch 选 `main`
-5. 保存后会开始首次构建
-
-### 2.3 配置环境变量
-
-在 Coolify 的 **Environment Variables** 面板里填：
-
-```env
-# 必填
-SESSION_SECRET=<32+ 字符随机串，用 openssl rand -hex 32>
-HELIUS_API_KEY=<从 helius.dev 申请>
-
-# 可选但推荐
-TELEGRAM_BOT_TOKEN=
-TELEGRAM_CHAT_ID=
-
-# 数据库（默认即可，compose 自动连）
-POSTGRES_USER=smart
-POSTGRES_PASSWORD=<改成强密码>
-POSTGRES_DB=smartwallet
+```bash
+# 服务器上
+cd /opt
+git clone https://github.com/zhibite/smartwallet.git
+cd smartwallet
+cp .env.example .env
+# 编辑 .env 填 SESSION_SECRET 和 HELIUS_API_KEY
+nano .env
 ```
 
-> ⚠️ Coolify 的 web/worker 容器需要让它们能解析到 `postgres` 和 `redis` 这两个 hostname。
-> 下载仓库后用 **Docker Compose** 部署时，service name 就是 hostname，可以直接连。
+### 2.3 启动
 
-### 2.4 启动顺序
+```bash
+docker compose up -d --build
+```
 
-Coolify 默认会按 `depends_on` + healthcheck 拉起：
-
-1. `postgres`（TimescaleDB 镜像，首次启动会自动 `/docker-entrypoint-initdb.d`）
+docker compose 会按依赖顺序启动：
+1. `postgres`（TimescaleDB 镜像）
 2. `redis`
-3. `web`（依赖前两者 healthcheck 通过）
-4. `worker`（依赖 web 也健康）
+3. `web`（绑定宿主端口 3001）
+4. `worker`（后台 BullMQ 进程，**不暴露端口**）
 
-### 2.5 首次初始化
-
-部署完成后，进 Coolify 控制台 → `web` 容器 → **Exec**：
+### 2.4 首次初始化
 
 ```bash
 # 1. 推送 schema
-npx prisma db push --schema=src/prisma/schema.prisma --skip-generate
+docker exec -it smartwallet-web npx prisma db push --schema=src/prisma/schema.prisma --skip-generate
 
-# 2. 启用 hypertable（一次性操作）
-npx tsx scripts/enable-timescale.ts
+# 2. 启用 hypertable
+docker exec -it smartwallet-web npx tsx scripts/enable-timescale.ts
 
 # 3. 初始化种子账号
-npx tsx src/prisma/seed.ts
+docker exec -it smartwallet-web npx tsx src/prisma/seed.ts
 ```
 
-如果你嫌手动 init 麻烦，可以在我下次发版里加 `init` 服务一次性跑这些。
+或者一次性跑：
 
-### 2.6 反向代理 / 域名
+```bash
+docker exec -it smartwallet-web sh -c \
+  "npx prisma db push --schema=src/prisma/schema.prisma --skip-generate && \
+   npx tsx scripts/enable-timescale.ts && \
+   npx tsx src/prisma/seed.ts"
+```
 
-Coolify 自动给 `web` 容器创建 Traefik 反代，你只需要：
+### 2.5 反向代理 + 域名
 
-1. 在 Coolify 的 **Domains** 配置里给 `web` 绑定 `smartwallet.yourdomain.com`
-2. 自动签 Let's Encrypt SSL
-3. 不要把 `worker` 暴露到公网
+你服务器上 Coolify 跑 Traefik，docker-compose 这边只负责监听端口，Traefik 单独配置域名。或者更简单：
 
-如果走 Cloudflare DNS，记得把 Cloudflare 代理关掉（橙色云关掉），否则 Next.js webhook 真实 IP 会被代理。
+```bash
+# 通过 Traefik labels（如果你想用 docker-compose 直接配域名）
+# 在 web 服务里加：
+#   labels:
+#     - "traefik.enable=true"
+#     - "traefik.http.routers.smartwallet-web.rule=Host(\`smartwallet.yourdomain.com\`)"
+#     - "traefik.http.routers.smartwallet-web.tls.certresolver=letsencrypt"
+#     - "traefik.http.services.smartwallet-web.loadbalancer.server.port=3001"
+```
 
-### 2.7 数据库备份
+如果走 Cloudflare 代理，记得把 Cloudflare 隧道或代理关掉（橙色云关掉）再走 Traefik，否则 Next.js 拿到的是 CDN IP。
 
-在 Coolify 的 **Cron Jobs** 里加：
+### 2.6 数据库备份
 
 ```bash
 # 每天 03:00 备份
-docker exec smartwallet-postgres pg_dump -U smart smartwallet | gzip > /etc/backups/smart-$(date +\%F).sql.gz
+0 3 * * * docker exec smartwallet-postgres pg_dump -U smart smartwallet | gzip > /etc/backups/smart-$(date +\%F).sql.gz
 
 # 保留 30 天
 find /etc/backups -mtime +30 -delete
 ```
 
-更推荐用 Coolify 的 **Backup** 面板直接扫描 `smartwallet-pgdata` 卷。
-
-### 2.8 升级流程
+### 2.7 升级流程
 
 ```bash
+cd /opt/smartwallet
 git pull origin main
-# Coolify 控制台 → 你的 app → "Deploy"
+docker compose up -d --build web worker
 ```
 
-Coolify 会自动 rebuild `web` + `worker` 两个镜像、保持 postgres/redis 数据不动。
+`postgres` / `redis` 容器数据不动，只重建 web/worker 镜像。
 
 ---
 

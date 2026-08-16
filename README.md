@@ -81,7 +81,7 @@ npm run db:generate
 npm run db:push
 npm run db:seed
 
-# 4. 启动 web（端口 3000）
+# 4. 启动 web（端口 3001）
 npm run dev
 
 # 5. 启动 worker（另一终端）
