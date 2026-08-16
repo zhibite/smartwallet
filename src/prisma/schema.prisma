@@ -1,0 +1,391 @@
+// SmartWallet Prisma schema
+// 数据库：PostgreSQL 16 + TimescaleDB 扩展
+// 时序表（PricePoint / AuditLog）配 hypertable 通过 migration SQL 手动启用
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [timescaledb]
+}
+
+// ----------------------------------------------------------------
+// Auth
+// ----------------------------------------------------------------
+
+enum Role {
+  ADMIN
+  VIEWER
+}
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String
+  role         Role     @default(VIEWER)
+  displayName  String?
+  enabled      Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  alerts       AlertConfig[]
+  auditLogs    AuditLog[]
+  savedQueries SavedQuery[]
+
+  @@index([role])
+}
+
+// ----------------------------------------------------------------
+// Wallet
+// ----------------------------------------------------------------
+
+model Wallet {
+  address     String   @id
+  label       String?
+  source      String?
+  trustScore  Int?     // 1-100 管理员手动打分
+  enabled     Boolean  @default(true)
+  notes       String?
+  firstSeenAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  manualTags  WalletTag[]
+  trades      Trade[]
+  holdings    Holding[]
+  syncStatus  SyncStatus?
+  metrics     WalletMetric?
+  signals     Signal[] @relation("SignalParticipants")
+
+  @@index([enabled])
+  @@index([label])
+}
+
+model Tag {
+  id          String   @id @default(cuid())
+  slug        String   @unique          // blue-chip-hunter / short-king / new-fomo / ...
+  name        String
+  category    TagCategory
+  description String?
+  isAuto      Boolean  @default(false)  // true 表示系统自动标签
+  rules       Json?                     // 自动标签规则 JSON
+  createdAt   DateTime @default(now())
+
+  wallets     WalletTag[]
+}
+
+enum TagCategory {
+  STYLE     // 短线王 / 蓝筹猎手 ...
+  RISK      // 砸盘型 / 高风险
+  TIMING    // 早鸟型 / 追涨型
+  SCALE     // 巨鲸 / 土狗
+  SOURCE    // KOL / 团队
+  OTHER
+}
+
+model WalletTag {
+  walletAddress String
+  tagId         String
+  source        String   @default("manual") // manual | auto
+  createdAt     DateTime @default(now())
+
+  wallet        Wallet @relation(fields: [walletAddress], references: [address], onDelete: Cascade)
+  tag           Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([walletAddress, tagId])
+  @@index([tagId])
+}
+
+model WalletMetric {
+  walletAddress         String   @id
+  winRate               Decimal? @db.Decimal(8, 4)
+  avgHoldingHours       Decimal? @db.Decimal(10, 2)
+  realizedPnlUsd        Decimal? @db.Decimal(20, 6)
+  unrealizedPnlUsd      Decimal? @db.Decimal(20, 6)
+  pnl30dUsd             Decimal? @db.Decimal(20, 6)
+  roi30d                Decimal? @db.Decimal(8, 4)
+  tradesCount           Int      @default(0)
+  winningTradesCount    Int      @default(0)
+  lastComputedAt        DateTime?
+  updatedAt             DateTime @updatedAt
+
+  wallet                Wallet   @relation(fields: [walletAddress], references: [address], onDelete: Cascade)
+}
+
+// ----------------------------------------------------------------
+// Trade / Holding / Token
+// ----------------------------------------------------------------
+
+enum TradeDirection {
+  BUY
+  SELL
+  TRANSFER_IN
+  TRANSFER_OUT
+}
+
+model Trade {
+  id           String   @id @default(cuid())
+  txSig        String   @unique
+  walletAddr   String
+  tokenMint    String
+  direction    TradeDirection
+  blockTime    DateTime
+  slot         BigInt
+  tokenAmount  Decimal  @db.Decimal(38, 0)
+  solAmount    Decimal? @db.Decimal(20, 9)
+  usdAmount    Decimal? @db.Decimal(20, 6)
+  priceUsd     Decimal? @db.Decimal(20, 12)
+  dex          String?
+  poolAddress  String?
+  counterparty String?
+  feeLamports  BigInt   @default(0)
+  isFailed     Boolean  @default(false)
+  isInternal   Boolean  @default(false)
+  isParseError Boolean  @default(false)
+  raw          Json?
+
+  wallet       Wallet   @relation(fields: [walletAddr], references: [address], onDelete: Cascade)
+  token        Token    @relation("TokenTrades", fields: [tokenMint], references: [mint], onDelete: Cascade)
+
+  @@index([walletAddr, blockTime(sort: Desc)])
+  @@index([tokenMint, blockTime(sort: Desc)])
+  @@index([direction, blockTime(sort: Desc)])
+}
+
+model Token {
+  mint          String   @id
+  symbol        String?
+  name          String?
+  decimals      Int      @default(9)
+  logoUri       String?
+  description   String?
+  website       String?
+  twitter       String?
+  telegram      String?
+  discord       String?
+  deployer      String?
+  renouncedMint Boolean  @default(false)
+  isMutable     Boolean  @default(true)
+  launchPlatform String?
+  firstSeenAt   DateTime @default(now())
+  launchedAt    DateTime?
+
+  // 最新实时字段
+  priceUsd      Decimal?  @db.Decimal(20, 12)
+  priceChange5m Decimal?  @db.Decimal(10, 4)
+  priceChange1h Decimal?  @db.Decimal(10, 4)
+  priceChange24h Decimal? @db.Decimal(10, 4)
+  priceChange7d Decimal?  @db.Decimal(10, 4)
+  priceChange30d Decimal? @db.Decimal(10, 4)
+  mcapUsd       Decimal?  @db.Decimal(20, 6)
+  fdvUsd        Decimal?  @db.Decimal(20, 6)
+  liquidityUsd  Decimal?  @db.Decimal(20, 6)
+  holdersCount  Int?
+  smartHolders  Int?                       // 当前持有该 token 的聪明钱数
+  top10HolderPct Decimal? @db.Decimal(8, 4)
+  whaleCount    Int?
+  totalSupply   Decimal? @db.Decimal(38, 0)
+  circulatingSupply Decimal? @db.Decimal(38, 0)
+
+  // 风险
+  honeypotRisk  Boolean?
+  buyTax        Decimal? @db.Decimal(8, 4)
+  sellTax       Decimal? @db.Decimal(8, 4)
+  rugRisk       Boolean?
+  riskScore     Int?     // 0-100, 越大越安全
+
+  priceSnapshotAt DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  trades        Trade[]   @relation("TokenTrades")
+  holdings      Holding[]
+  pricePoints   PricePoint[]
+  signals       Signal[]
+
+  @@index([symbol])
+  @@index([mcapUsd])
+  @@index([smartHolders])
+}
+
+model Holding {
+  walletAddr    String
+  tokenMint     String
+  amount        Decimal  @db.Decimal(38, 0)
+  costBasisUsd  Decimal  @db.Decimal(20, 6)
+  remainingAmount Decimal @db.Decimal(38, 0)
+  acquiredAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  lastBuyAt     DateTime?
+  lastSellAt    DateTime?
+
+  wallet        Wallet   @relation(fields: [walletAddr], references: [address], onDelete: Cascade)
+  token         Token    @relation(fields: [tokenMint], references: [mint], onDelete: Cascade)
+
+  @@id([walletAddr, tokenMint])
+  @@index([tokenMint])
+}
+
+// 时序表，价格/市值/流动性快照（按 5min）
+// 通过 SQL migration 转为 TimescaleDB hypertable
+model PricePoint {
+  id           BigInt   @id @default(autoincrement())
+  tokenMint    String
+  ts           DateTime
+  priceUsd     Decimal? @db.Decimal(20, 12)
+  mcapUsd      Decimal? @db.Decimal(20, 6)
+  liquidityUsd Decimal? @db.Decimal(20, 6)
+  volume24hUsd Decimal? @db.Decimal(20, 6)
+  holdersCount Int?
+
+  token        Token    @relation(fields: [tokenMint], references: [mint], onDelete: Cascade)
+
+  @@index([tokenMint, ts(sort: Desc)])
+}
+
+// ----------------------------------------------------------------
+// Signal & Alert
+// ----------------------------------------------------------------
+
+enum SignalType {
+  CONSENSUS_BUY
+  WHALE_BUY
+  NEW_TOKEN_FOMO
+  GROUP_SELL
+  HOLDING_CLEARED
+  PRICE_ANOMALY
+}
+
+model Signal {
+  id          String      @id @default(cuid())
+  type        SignalType
+  tokenMint   String
+  strength    Int         @default(0)          // 0-100
+  detectedAt  DateTime    @default(now())
+  windowStart DateTime
+  windowEnd   DateTime
+  metadata    Json?
+  dispatched  Boolean     @default(false)
+  dispatchedAt DateTime?
+
+  token       Token       @relation(fields: [tokenMint], references: [mint], onDelete: Cascade)
+  wallets     Wallet[]    @relation("SignalParticipants")
+
+  @@index([type, detectedAt(sort: Desc)])
+  @@index([tokenMint, detectedAt(sort: Desc)])
+  @@index([detectedAt(sort: Desc)])
+}
+
+enum AlertChannel {
+  TELEGRAM
+  WEBHOOK
+  IN_APP
+  EMAIL
+}
+
+model AlertConfig {
+  id          String        @id @default(cuid())
+  userId      String
+  name        String
+  channel     AlertChannel
+  target      String        // chat_id or URL
+  rules       Json          // 阈值配置
+  enabled     Boolean       @default(true)
+  quietUntil  DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  logs        AlertLog[]
+
+  @@index([userId])
+}
+
+model AlertLog {
+  id           String      @id @default(cuid())
+  alertId      String
+  signalId     String?
+  status       String      // SENT / FAILED / SKIPPED
+  payload      Json?
+  errorMessage String?
+  sentAt       DateTime    @default(now())
+
+  alert        AlertConfig @relation(fields: [alertId], references: [id], onDelete: Cascade)
+
+  @@index([alertId, sentAt(sort: Desc)])
+}
+
+// ----------------------------------------------------------------
+// Sync / Audit
+// ----------------------------------------------------------------
+
+model SyncStatus {
+  walletAddress        String   @id
+  lastSyncedSignature  String?
+  lastSyncedAt         DateTime?
+  cursorSlot           BigInt?
+  status               String   @default("OK") // OK / LAG / ERROR / DISABLED
+  errorMessage         String?
+  lagSeconds           Int?
+  updatedAt            DateTime @updatedAt
+
+  wallet               Wallet   @relation(fields: [walletAddress], references: [address], onDelete: Cascade)
+}
+
+model AuditLog {
+  id         BigInt   @id @default(autoincrement())
+  userId     String?
+  action     String
+  target     String?
+  payload    Json?
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([action, createdAt(sort: Desc)])
+}
+
+// ----------------------------------------------------------------
+// Saved Query (3.7)
+// ----------------------------------------------------------------
+
+model SavedQuery {
+  id          String   @id @default(cuid())
+  userId      String
+  name        String
+  description String?
+  scope       String                              // wallet | token
+  criteria    Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, scope])
+}
+
+// ----------------------------------------------------------------
+// Report (3.10)
+// ----------------------------------------------------------------
+
+model Report {
+  id          String   @id @default(cuid())
+  kind        String   // weekly | monthly | single_wallet | single_token
+  subjectKey  String   // 日期 or wallet addr or token mint
+  status      String   @default("PENDING") // PENDING / RUNNING / DONE / FAILED
+  filePath    String?
+  storageUrl  String?
+  sizeBytes   Int?
+  errorMessage String?
+  generatedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([kind, createdAt(sort: Desc)])
+}
