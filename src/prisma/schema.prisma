@@ -231,8 +231,9 @@ model Holding {
 
 // 时序表，价格/市值/流动性快照（按 5min）
 // 通过 SQL migration 转为 TimescaleDB hypertable
+// 注：TimescaleDB 要求 hypertable 分区列（ts）必须包含在主键或唯一索引里，
+// 因此这里使用 (tokenMint, ts) 复合主键，而非自增 id。
 model PricePoint {
-  id           BigInt   @id @default(autoincrement())
   tokenMint    String
   ts           DateTime
   priceUsd     Decimal? @db.Decimal(20, 12)
@@ -243,6 +244,7 @@ model PricePoint {
 
   token        Token    @relation(fields: [tokenMint], references: [mint], onDelete: Cascade)
 
+  @@id([tokenMint, ts])
   @@index([tokenMint, ts(sort: Desc)])
 }
 
@@ -347,6 +349,10 @@ model AuditLog {
 
   user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
+  // 注：createdAt 不进主键（AuditLog 的 PK 仍是 id），所以TimescaleDB 会报错
+  // "cannot create a unique index without the column createdAt"。解决办法见
+  // scripts/enable-timescale.ts：在 create_hypertable 之前先
+  // CREATE UNIQUE INDEX ON "AuditLog" ("createdAt", "id")。
   @@index([userId, createdAt(sort: Desc)])
   @@index([action, createdAt(sort: Desc)])
 }
