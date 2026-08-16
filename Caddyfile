@@ -17,7 +17,10 @@ smartwallet.tokensee.com {
     }
 }
 
-# 健康检查端点（可选）
-health.smartwallet.tokensee.com {
-    respond "ok" 200
-}
+# 健康检查端点（可选）—— 默认注释掉，因为要求 health 子域解析。
+# 如果你打算用 health.smartwallet.tokensee.com 做 LB 健康检查，
+# 在 DNS 加一条 A 记录指向 VPS，然后取消下面注释并 reload caddy。
+#
+# health.smartwallet.tokensee.com {
+#     respond "ok" 200
+# }
