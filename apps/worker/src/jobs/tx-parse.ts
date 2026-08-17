@@ -68,25 +68,43 @@ export async function txParseHandler(job: Job<ParsePayload>) {
   if (transfers.length === 0) return { skipped: true, reason: "no token transfers" };
 
   // 启发式判定：钱包是 transfer 的 fromUserAccount => SELL；是 toUserAccount => BUY
+  // 一个 swap 通常有多个 leg（SOL↔token, 路由, 手续费），按 mint 聚合净流量；
+  // 净 in > 0 => BUY，净 out > 0 => SELL，0 => 跳过。
+  // 一笔 tx = 一个 trade，按 mint 分别落库。
+  const grouped = new Map<
+    string,
+    { tr: (typeof transfers)[number]; netRaw: number; direction: "BUY" | "SELL" }
+  >();
+
   for (const tr of transfers) {
-    const direction =
-      tr.fromUserAccount === walletAddress
-        ? "SELL"
-        : tr.toUserAccount === walletAddress
-          ? "BUY"
-          : null;
-    if (!direction) continue;
-
-    // 过滤内部转账（同币同向且对手在监控列表）
-    if (
-      tr.fromUserAccount !== walletAddress &&
-      tr.toUserAccount !== walletAddress
-    ) {
-      continue;
-    }
-
     const mint = tr.mint;
-    const amountRaw = tr.tokenAmount * Math.pow(10, tr.decimals ?? 0);
+    const raw = tr.tokenAmount * Math.pow(10, tr.decimals ?? 0);
+    let entry = grouped.get(mint);
+    if (!entry) {
+      entry = { tr, netRaw: 0, direction: tr.toUserAccount === walletAddress ? "BUY" : "SELL" };
+      grouped.set(mint, entry);
+    }
+    if (tr.toUserAccount === walletAddress) entry.netRaw += raw;
+    if (tr.fromUserAccount === walletAddress) entry.netRaw -= raw;
+  }
+
+  // 一个 tx 仅产一笔 trade：取净流量绝对值最大的 mint 作为本笔主 trade
+  let primary: { tr: (typeof transfers)[number]; netRaw: number; direction: "BUY" | "SELL" } | null = null;
+  for (const entry of grouped.values()) {
+    if (entry.netRaw === 0) continue;
+    if (!primary || Math.abs(entry.netRaw) > Math.abs(primary.netRaw)) {
+      primary = entry;
+    }
+  }
+  if (!primary) return { skipped: true, reason: "no net flow" };
+
+  const involvedList = [primary];
+
+  for (const entry of involvedList) {
+    const tr = entry.tr;
+    const direction = entry.direction;
+    const mint = tr.mint;
+    const amountRaw = Math.abs(entry.netRaw);
 
     // upsert token
     await prisma.token.upsert({
