@@ -107,64 +107,67 @@ export async function txParseHandler(job: Job<ParsePayload>) {
     const mint = tr.mint;
     const amountRaw = Math.abs(entry.netRaw);
 
-    // upsert token
-    await prisma.token.upsert({
-      where: { mint },
-      create: {
-        mint,
-        decimals: tr.decimals ?? 0,
-        symbol: tr.tokenSymbol ?? null,
-        name: tr.tokenName ?? null,
-      },
-      update: {},
-    });
-
-    await prisma.trade.create({
-      data: {
-        txSig: signature,
-        walletAddr: walletAddress,
-        tokenMint: mint,
-        direction,
-        blockTime: new Date(blockTime),
-        slot: BigInt(slot),
-        tokenAmount: amountRaw.toString(),
-        feeLamports: BigInt(txAny.fee ?? 0),
-        raw: tx as unknown as object,
-      },
-    });
-
-    // 更新 holding
-    const holding = await prisma.holding.findUnique({
-      where: { walletAddr_tokenMint: { walletAddr: walletAddress, tokenMint: mint } },
-    });
-    if (direction === "BUY") {
-      await prisma.holding.upsert({
-        where: { walletAddr_tokenMint: { walletAddr: walletAddress, tokenMint: mint } },
+    // 整个 insert 包在一个事务里，保证 token 存在 + trade 不重复 + holding 更新原子性
+    await prisma.$transaction(async (ptx) => {
+      // upsert token
+      await ptx.token.upsert({
+        where: { mint },
         create: {
+          mint,
+          decimals: tr.decimals ?? 0,
+          symbol: tr.tokenSymbol ?? null,
+          name: tr.tokenName ?? null,
+        },
+        update: {},
+      });
+
+      await ptx.trade.create({
+        data: {
+          txSig: signature,
           walletAddr: walletAddress,
           tokenMint: mint,
-          amount: amountRaw.toString(),
-          remainingAmount: amountRaw.toString(),
-          costBasisUsd: "0",
-          lastBuyAt: new Date(blockTime),
-        },
-        update: {
-          amount: { increment: amountRaw },
-          remainingAmount: { increment: amountRaw },
-          lastBuyAt: new Date(blockTime),
+          direction,
+          blockTime: new Date(blockTime),
+          slot: BigInt(slot),
+          tokenAmount: amountRaw.toString(),
+          feeLamports: BigInt(txAny.fee ?? 0),
+          raw: tx as unknown as object,
         },
       });
-    } else {
-      if (holding) {
-        await prisma.holding.update({
+
+      // 更新 holding
+      const holding = await ptx.holding.findUnique({
+        where: { walletAddr_tokenMint: { walletAddr: walletAddress, tokenMint: mint } },
+      });
+      if (direction === "BUY") {
+        await ptx.holding.upsert({
           where: { walletAddr_tokenMint: { walletAddr: walletAddress, tokenMint: mint } },
-          data: {
-            remainingAmount: { decrement: Math.min(Number(holding.remainingAmount), amountRaw) },
-            lastSellAt: new Date(blockTime),
+          create: {
+            walletAddr: walletAddress,
+            tokenMint: mint,
+            amount: amountRaw.toString(),
+            remainingAmount: amountRaw.toString(),
+            costBasisUsd: "0",
+            lastBuyAt: new Date(blockTime),
+          },
+          update: {
+            amount: { increment: amountRaw },
+            remainingAmount: { increment: amountRaw },
+            lastBuyAt: new Date(blockTime),
           },
         });
+      } else {
+        if (holding) {
+          await ptx.holding.update({
+            where: { walletAddr_tokenMint: { walletAddr: walletAddress, tokenMint: mint } },
+            data: {
+              remainingAmount: { decrement: Math.min(Number(holding.remainingAmount), amountRaw) },
+              lastSellAt: new Date(blockTime),
+            },
+          });
+        }
       }
-    }
+    });
   }
 
   // trigger consensus detection for this tx
