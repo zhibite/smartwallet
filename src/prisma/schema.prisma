@@ -134,7 +134,7 @@ model Trade {
   direction    TradeDirection
   blockTime    DateTime
   slot         BigInt
-  tokenAmount  Decimal  @db.Decimal(38, 0)
+  tokenAmount  Decimal  @db.Decimal(38, 12)
   solAmount    Decimal? @db.Decimal(20, 9)
   usdAmount    Decimal? @db.Decimal(20, 6)
   priceUsd     Decimal? @db.Decimal(20, 12)
@@ -214,9 +214,9 @@ model Token {
 model Holding {
   walletAddr    String
   tokenMint     String
-  amount        Decimal  @db.Decimal(38, 0)
+  amount        Decimal  @db.Decimal(38, 12)
   costBasisUsd  Decimal  @db.Decimal(20, 6)
-  remainingAmount Decimal @db.Decimal(38, 0)
+  remainingAmount Decimal @db.Decimal(38, 12)
   acquiredAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   lastBuyAt     DateTime?

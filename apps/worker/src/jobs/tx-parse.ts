@@ -78,7 +78,8 @@ export async function txParseHandler(job: Job<ParsePayload>) {
 
   for (const tr of transfers) {
     const mint = tr.mint;
-    const raw = tr.tokenAmount * Math.pow(10, tr.decimals ?? 0);
+    // Helius Enhanced transaction 的 tokenAmount 已经是 UI 单位（不是 raw lamports）
+    const raw = tr.tokenAmount;
     let entry = grouped.get(mint);
     if (!entry) {
       entry = { tr, netRaw: 0, direction: tr.toUserAccount === walletAddress ? "BUY" : "SELL" };
@@ -126,7 +127,7 @@ export async function txParseHandler(job: Job<ParsePayload>) {
         direction,
         blockTime: new Date(blockTime),
         slot: BigInt(slot),
-        tokenAmount: amountRaw.toFixed(0),
+        tokenAmount: amountRaw.toString(),
         feeLamports: BigInt(txAny.fee ?? 0),
         raw: tx as unknown as object,
       },
@@ -142,8 +143,8 @@ export async function txParseHandler(job: Job<ParsePayload>) {
         create: {
           walletAddr: walletAddress,
           tokenMint: mint,
-          amount: amountRaw.toFixed(0),
-          remainingAmount: amountRaw.toFixed(0),
+          amount: amountRaw.toString(),
+          remainingAmount: amountRaw.toString(),
           costBasisUsd: "0",
           lastBuyAt: new Date(blockTime),
         },
