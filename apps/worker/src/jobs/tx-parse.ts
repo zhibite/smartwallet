@@ -48,7 +48,7 @@ export async function txParseHandler(job: Job<ParsePayload>) {
   // 用 Helius Parse Transactions REST endpoint 一次性批量解析（type / tokenTransfers）
   let parsed: Array<{ signature: string; type?: string; tokenTransfers?: unknown[] }>;
   try {
-    parsed = await helius.parseTransactions([signature]);
+    parsed = await helius.parseTransactions([signature]) as typeof parsed;
   } catch (e) {
     console.error(`[tx-parse] ${job.id} parseTransactions threw:`, e instanceof Error ? e.message : e);
     throw e;
