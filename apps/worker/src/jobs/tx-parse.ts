@@ -27,9 +27,8 @@ export async function txParseHandler(job: Job<ParsePayload>) {
 
   if (err) return { skipped: true, reason: "tx failed on-chain" };
 
-  const txs = await helius.getTransactionsForAddress(walletAddress);
-  const tx = txs.find((t) => t.signature === signature);
-  if (!tx) return { skipped: true, reason: "tx not in window" };
+  const tx = await helius.getTransaction(signature);
+  if (!tx) return { skipped: true, reason: "tx not fetchable" };
 
   const transfers = (tx.tokenTransfers ?? []).filter(
     (t) => t.tokenStandard === "Fungible",

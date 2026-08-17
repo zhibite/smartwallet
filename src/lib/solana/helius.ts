@@ -25,12 +25,18 @@ export class HeliusClient {
     this.rpcUrl = url;
   }
 
-  private async rpc<T>(method: string, params: unknown[]): Promise<T> {
+  private async rpc<T>(method: string, params: unknown[], attempt = 0): Promise<T> {
     const res = await fetch(this.rpcUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id: method, method, params }),
     });
+    // 429 / 5xx: 指数退避重试（最多 5 次）
+    if ((res.status === 429 || res.status >= 500) && attempt < 5) {
+      const wait = Math.min(2 ** attempt * 500, 8000) + Math.floor(Math.random() * 250);
+      await new Promise((r) => setTimeout(r, wait));
+      return this.rpc<T>(method, params, attempt + 1);
+    }
     if (!res.ok) throw new Error(`Helius ${method} HTTP ${res.status}`);
     const json = (await res.json()) as { result?: T; error?: { message: string } };
     if (json.error) throw new Error(`Helius ${method}: ${json.error.message}`);
