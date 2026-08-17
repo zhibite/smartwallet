@@ -65,9 +65,8 @@ services:
       REDIS_URL: redis://redis:6379
       SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET must be set}
       HELIUS_API_KEY: ${HELIUS_API_KEY:-}
-      HELIUS_RPC_URL: ${HELIUS_RPC_URL:-https://mainnet.helius-rpc.com}
+      HELIUS_RPC_URL: ${HELIUS_RPC_URL:-}
       BIRDEYE_API_KEY: ${BIRDEYE_API_KEY:-}
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       NODE_ENV: production
       PORT: 3001
       NEXT_TELEMETRY_DISABLED: 1
@@ -97,7 +96,7 @@ services:
       REDIS_URL: redis://redis:6379
       SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET must be set}
       HELIUS_API_KEY: ${HELIUS_API_KEY:-}
-      HELIUS_RPC_URL: ${HELIUS_RPC_URL:-https://mainnet.helius-rpc.com}
+      HELIUS_RPC_URL: ${HELIUS_RPC_URL:-}
       BIRDEYE_API_KEY: ${BIRDEYE_API_KEY:-}
       NODE_ENV: production
       WORKER_CRON_TX_SYNC: ${WORKER_CRON_TX_SYNC:-*/30 * * * * *}

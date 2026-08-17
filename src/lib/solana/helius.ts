@@ -13,11 +13,15 @@ export class HeliusClient {
   private readonly rpcUrl: string;
 
   constructor(opts: HeliusOptions = {}) {
+    // 优先用 apiKey 拼标准 Helius URL（带 ?api-key=）
+    // 只在显式传 rpcUrl 且不含 api-key 时才用 rpcUrl（向后兼容自托管 RPC）
+    const hasApiKeyInUrl = opts.rpcUrl?.includes("api-key=");
     const url =
-      opts.rpcUrl ??
-      (opts.apiKey
+      opts.apiKey
         ? `https://mainnet.helius-rpc.com/?api-key=${opts.apiKey}`
-        : process.env.HELIUS_RPC_URL ?? "https://api.mainnet-beta.solana.com");
+        : hasApiKeyInUrl
+          ? opts.rpcUrl!
+          : opts.rpcUrl ?? process.env.HELIUS_RPC_URL ?? "https://api.mainnet-beta.solana.com";
     this.rpcUrl = url;
   }
 
