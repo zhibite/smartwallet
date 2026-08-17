@@ -1,12 +1,24 @@
 import type { Job } from "bullmq";
 import { prisma } from "@/lib/db";
 import { HeliusClient } from "@/lib/solana/helius";
-import { queues, QUEUE_NAMES } from "../queue";
+import { queues } from "../queue";
 
 const helius = new HeliusClient({
   apiKey: process.env.HELIUS_API_KEY,
   rpcUrl: process.env.HELIUS_RPC_URL,
 });
+
+/** Jupiter Price API（免 key）获取 SOL/USD 价格 */
+async function getSolPrice(): Promise<number | null> {
+  try {
+    const res = await fetch("https://api.jup.ag/price/v2?ids=SOL");
+    if (!res.ok) return null;
+    const json = (await res.json()) as { data?: { SOL?: { price?: number } } };
+    return json.data?.SOL?.price ?? null;
+  } catch {
+    return null;
+  }
+}
 
 interface ParsePayload {
   walletAddress: string;
@@ -46,11 +58,20 @@ export async function txParseHandler(job: Job<ParsePayload>) {
     console.log(`[tx-parse] ${job.id} skipped (parse returned empty for ${signature.slice(0, 12)}…)`);
     return { skipped: true, reason: "tx not fetchable" };
   }
-  console.log(`[tx-parse] ${job.id} got tx ${signature.slice(0, 12)}… type=${tx.type ?? "?"} transfers=${(tx.tokenTransfers ?? []).length}`);
-
-  // parsed[0] 是 Helius Enhanced Transaction 格式：type / tokenTransfers / fee / ...
+  // parsed[0] 是 Helius Enhanced Transaction 格式：type / tokenTransfers / fee / source / nativeTransfers / accountData
   const txAny = tx as unknown as {
     fee?: number;
+    type?: string;
+    source?: string;
+    nativeTransfers?: Array<{
+      amount: number;
+      fromUserAccount: string;
+      toUserAccount: string;
+    }>;
+    accountData?: Array<{
+      account: string;
+      nativeBalanceChange?: number;
+    }>;
     tokenTransfers?: Array<{
       tokenStandard?: string;
       mint: string;
@@ -62,6 +83,35 @@ export async function txParseHandler(job: Job<ParsePayload>) {
       toUserAccount: string;
     }>;
   };
+
+  console.log(`[tx-parse] ${job.id} got tx ${signature.slice(0, 12)}… type=${txAny.type ?? "?"} dex=${txAny.source ?? "?"} transfers=${(txAny.tokenTransfers ?? []).length}`);
+
+  // ---------- 计算 SOL 净流量（UI 单位 = lamports / 1e9） ----------
+  const walletNativeFlow = (txAny.nativeTransfers ?? []).reduce((sum, nt) => {
+    if (nt.toUserAccount === walletAddress) return sum + nt.amount;
+    if (nt.fromUserAccount === walletAddress) return sum - nt.amount;
+    return sum;
+  }, 0);
+  const solAmount = walletNativeFlow !== 0 ? Math.abs(walletNativeFlow / 1e9) : null;
+
+  // ---------- 推断 poolAddress：取非钱包、非 ATA、非系统账号的第一个 program account ----------
+  const poolAddress = (() => {
+    const skip = new Set([
+      walletAddress,
+      "11111111111111111111111111111111",
+      "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+      "ComputeBudget111111111111111111111111111111",
+    ]);
+    const seen = new Set<string>();
+    for (const acc of txAny.accountData ?? []) {
+      if (seen.has(acc.account) || skip.has(acc.account)) continue;
+      seen.add(acc.account);
+      if (acc.account.length === 32 || acc.account.length === 44) return acc.account;
+    }
+    return null;
+  })();
+
   const transfers = (txAny.tokenTransfers ?? []).filter(
     (t) => t.tokenStandard === "Fungible",
   );
@@ -121,6 +171,9 @@ export async function txParseHandler(job: Job<ParsePayload>) {
         update: {},
       });
 
+      // 获取 SOL/USD 价格
+      const solPrice = await getSolPrice();
+
       await ptx.trade.create({
         data: {
           txSig: signature,
@@ -132,6 +185,16 @@ export async function txParseHandler(job: Job<ParsePayload>) {
           tokenAmount: amountRaw.toString(),
           feeLamports: BigInt(txAny.fee ?? 0),
           raw: tx as unknown as object,
+          // 新增字段
+          dex: txAny.source ?? null,
+          poolAddress: poolAddress,
+          solAmount: solAmount != null ? solAmount.toString() : null,
+          priceUsd: solPrice != null && solAmount != null && amountRaw > 0
+            ? ((solAmount * solPrice) / amountRaw).toString()
+            : null,
+          usdAmount: solPrice != null && solAmount != null
+            ? (solAmount * solPrice).toString()
+            : null,
         },
       });
 
