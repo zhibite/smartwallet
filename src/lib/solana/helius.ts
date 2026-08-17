@@ -1,6 +1,6 @@
 /**
  * Helius RPC client 极简封装
- * - Enhanced Transactions API (getTransactionsForAddress)
+ * - Enhanced Transactions API (parseTransactions / getTransactionsForAddress)
  * - DAS API  getAsset / getAssetsByOwner
  * - getSignaturesForAddress
  */
@@ -23,6 +23,53 @@ export class HeliusClient {
           ? opts.rpcUrl!
           : opts.rpcUrl ?? process.env.HELIUS_RPC_URL ?? "https://api.mainnet-beta.solana.com";
     this.rpcUrl = url;
+  }
+
+  /** Helius Enhanced Transactions REST endpoint（带 api-key query string） */
+  private readonly enhancedBaseUrl = (() => {
+    const apiKey = process.env.HELIUS_API_KEY;
+    return apiKey ? `https://mainnet.helius-rpc.com/v0/transactions?api-key=${apiKey}` : null;
+  })();
+
+  /**
+   * Helius Parse Transactions（增强解析，返回 type / tokenTransfers / nativeTransfers / events / source / description）
+   * POST /v0/transactions  body: { transactions: [...sig], commitment }
+   * 单次最多 100 sig；内部按 100 切片。失败 / 单 sig 时返回空数组让 caller 走降级路径。
+   */
+  async parseTransactions(signatures: string[], commitment: "finalized" | "confirmed" = "confirmed") {
+    if (!this.enhancedBaseUrl || signatures.length === 0) return [];
+    const out: unknown[] = [];
+    for (let i = 0; i < signatures.length; i += 100) {
+      const batch = signatures.slice(i, i + 100);
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          const res = await fetch(this.enhancedBaseUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ transactions: batch, commitment }),
+          });
+          if ((res.status === 429 || res.status >= 500) && attempt < 4) {
+            const wait = Math.min(2 ** attempt * 500, 8000) + Math.floor(Math.random() * 250);
+            await new Promise((r) => setTimeout(r, wait));
+            continue;
+          }
+          if (!res.ok) {
+            console.warn(`[helius] parseTransactions HTTP ${res.status}`);
+            return out;
+          }
+          const json = (await res.json()) as unknown[];
+          if (Array.isArray(json)) out.push(...json);
+          break;
+        } catch (e) {
+          if (attempt === 4) {
+            console.warn(`[helius] parseTransactions threw:`, e instanceof Error ? e.message : e);
+            return out;
+          }
+          await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+        }
+      }
+    }
+    return out;
   }
 
   private async rpc<T>(method: string, params: unknown[], attempt = 0): Promise<T> {
@@ -56,13 +103,6 @@ export class HeliusClient {
     }>>("getSignaturesForAddress", [
       address,
       { limit: options.limit ?? 100, ...(options.until ? { until: options.until } : {}), ...(options.before ? { before: options.before } : {}) },
-    ]);
-  }
-
-  getTransaction(signature: string) {
-    return this.rpc<unknown>("getTransaction", [
-      signature,
-      { encoding: "json", maxSupportedTransactionVersion: 0, commitment: "confirmed" },
     ]);
   }
 

@@ -33,20 +33,36 @@ export async function txParseHandler(job: Job<ParsePayload>) {
     return { skipped: true, reason: "tx failed on-chain" };
   }
 
-  let tx;
+  // 用 Helius Parse Transactions REST endpoint 一次性批量解析（type / tokenTransfers）
+  let parsed: Array<{ signature: string; type?: string; tokenTransfers?: unknown[] }>;
   try {
-    tx = await helius.getTransaction(signature);
+    parsed = await helius.parseTransactions([signature]);
   } catch (e) {
-    console.error(`[tx-parse] ${job.id} helius getTransaction threw:`, e instanceof Error ? e.message : e);
+    console.error(`[tx-parse] ${job.id} parseTransactions threw:`, e instanceof Error ? e.message : e);
     throw e;
   }
+  const tx = parsed[0];
   if (!tx) {
-    console.log(`[tx-parse] ${job.id} skipped (null tx for ${signature.slice(0, 12)}…)`);
+    console.log(`[tx-parse] ${job.id} skipped (parse returned empty for ${signature.slice(0, 12)}…)`);
     return { skipped: true, reason: "tx not fetchable" };
   }
-  console.log(`[tx-parse] ${job.id} got tx ${signature.slice(0, 12)}… type=${tx.type} transfers=${(tx.tokenTransfers ?? []).length}`);
+  console.log(`[tx-parse] ${job.id} got tx ${signature.slice(0, 12)}… type=${tx.type ?? "?"} transfers=${(tx.tokenTransfers ?? []).length}`);
 
-  const transfers = (tx.tokenTransfers ?? []).filter(
+  // parsed[0] 是 Helius Enhanced Transaction 格式：type / tokenTransfers / fee / ...
+  const txAny = tx as unknown as {
+    fee?: number;
+    tokenTransfers?: Array<{
+      tokenStandard?: string;
+      mint: string;
+      tokenAmount: number;
+      decimals?: number;
+      tokenSymbol?: string;
+      tokenName?: string;
+      fromUserAccount: string;
+      toUserAccount: string;
+    }>;
+  };
+  const transfers = (txAny.tokenTransfers ?? []).filter(
     (t) => t.tokenStandard === "Fungible",
   );
   if (transfers.length === 0) return { skipped: true, reason: "no token transfers" };
@@ -93,7 +109,7 @@ export async function txParseHandler(job: Job<ParsePayload>) {
         blockTime: new Date(blockTime),
         slot: BigInt(slot),
         tokenAmount: amountRaw.toFixed(0),
-        feeLamports: BigInt(tx.fee ?? 0),
+        feeLamports: BigInt(txAny.fee ?? 0),
         raw: tx as unknown as object,
       },
     });
