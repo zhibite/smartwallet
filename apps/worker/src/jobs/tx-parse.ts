@@ -23,12 +23,28 @@ export async function txParseHandler(job: Job<ParsePayload>) {
   const { walletAddress, signature, blockTime, slot, err } = job.data;
 
   const exists = await prisma.trade.findUnique({ where: { txSig: signature } });
-  if (exists) return { skipped: true };
+  if (exists) {
+    console.log(`[tx-parse] ${job.id} skipped (already in DB)`);
+    return { skipped: true };
+  }
 
-  if (err) return { skipped: true, reason: "tx failed on-chain" };
+  if (err) {
+    console.log(`[tx-parse] ${job.id} skipped (failed on-chain)`);
+    return { skipped: true, reason: "tx failed on-chain" };
+  }
 
-  const tx = await helius.getTransaction(signature);
-  if (!tx) return { skipped: true, reason: "tx not fetchable" };
+  let tx;
+  try {
+    tx = await helius.getTransaction(signature);
+  } catch (e) {
+    console.error(`[tx-parse] ${job.id} helius getTransaction threw:`, e instanceof Error ? e.message : e);
+    throw e;
+  }
+  if (!tx) {
+    console.log(`[tx-parse] ${job.id} skipped (null tx for ${signature.slice(0, 12)}…)`);
+    return { skipped: true, reason: "tx not fetchable" };
+  }
+  console.log(`[tx-parse] ${job.id} got tx ${signature.slice(0, 12)}… type=${tx.type} transfers=${(tx.tokenTransfers ?? []).length}`);
 
   const transfers = (tx.tokenTransfers ?? []).filter(
     (t) => t.tokenStandard === "Fungible",

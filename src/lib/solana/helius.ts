@@ -90,6 +90,28 @@ export class HeliusClient {
     ]);
   }
 
+  /**
+   * 单笔 Enhanced Transaction（per-signature，1 credit per call）
+   * 注意：Helius 把 enhanced 详情暴露在 RPC 的 getTransaction 上（会重写标准方法，
+   * 带上 tokenTransfers / nativeTransfers / events / accountData / type / source）。
+   */
+  getTransaction(signature: string) {
+    return this.rpc<{
+      signature: string;
+      slot: number;
+      blockTime: number;
+      type: string;
+      source?: string;
+      fee: number;
+      feePayer: string;
+      nativeTransfers?: unknown[];
+      tokenTransfers?: HeliusTokenTransfer[];
+      accountData?: unknown[];
+      events?: unknown;
+      description?: string;
+    } | null>("getTransaction", [signature, { encoding: "json", maxSupportedTransactionVersion: 0 }]);
+  }
+
   /** DAS - get asset metadata */
   getAsset(id: string) {
     return this.rpc<HeliusAsset>("getAsset", [id]);
